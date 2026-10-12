@@ -56,17 +56,18 @@ window.__ModuleLoader__.load({
 .dgi-chip{border:1px solid var(--dsw-alias-border-l1);border-radius:6px;padding:0 5px;font-size:11px;color:var(--dsw-alias-label-secondary);flex:none}
 .dgi-meta{color:var(--dsw-alias-label-secondary);font-size:12px;flex:none}
 .dgi-hint{padding:6px 10px;color:var(--dsw-alias-label-secondary);font-size:12px}
+.dgi-pre{white-space:pre-wrap;word-break:break-all;font-size:11px;line-height:16px;color:var(--dsw-alias-label-secondary);background:var(--dsw-alias-bg-layer-1);border:1px solid var(--dsw-alias-border-l1);border-radius:8px;padding:8px;max-height:50vh;overflow:auto;margin:0}
 .dgi-create{border-top:1px solid var(--dsw-alias-border-l1);padding:8px 10px;display:flex;flex-direction:column;gap:6px}
 .dgi-textarea{width:100%;box-sizing:border-box;background:var(--dsw-alias-bg-layer-1);color:var(--dsw-alias-label-primary);border:1px solid var(--dsw-alias-border-l1);border-radius:8px;padding:6px 8px;font-size:13px;font-family:inherit;resize:vertical;outline:none}
 .dgi-textarea:focus{border-color:var(--dsw-alias-brand-primary)}
 .dgi-notice{color:var(--dsw-alias-label-secondary);font-size:12px}
-.dgi-panel{display:flex;flex-direction:column;gap:10px;padding:16px 20px;font-size:13px;color:var(--dsw-alias-label-primary);height:100%;min-height:0;box-sizing:border-box;overflow:hidden}
+.dgi-panel{display:flex;flex-direction:column;gap:10px;padding:16px 20px;font-size:13px;color:var(--dsw-alias-label-primary);box-sizing:border-box}
 .dgi-panel-head{display:flex;align-items:center;gap:8px;flex-wrap:wrap;flex:none}
 .dgi-panel-title{font-size:15px;font-weight:600}
 .dgi-input,.dgi-select{background:var(--dsw-alias-bg-layer-1);color:var(--dsw-alias-label-primary);border:1px solid var(--dsw-alias-border-l1);border-radius:8px;padding:5px 9px;font-size:13px;font-family:inherit;outline:none}
 .dgi-select-sm{height:26px;padding:0 6px;font-size:12px;max-width:150px}
 .dgi-input:focus,.dgi-select:focus{border-color:var(--dsw-alias-brand-primary)}
-.dgi-split{display:flex;gap:12px;flex:1 1 auto;min-height:0;overflow:hidden}
+.dgi-split{display:flex;gap:12px;flex:1 1 auto;min-height:320px;max-height:calc(100vh - 260px)}
 .dgi-list{flex:1 1 58%;min-width:0;min-height:0;max-height:calc(100vh - 230px);overflow:auto;border:1px solid var(--dsw-alias-border-l1);border-radius:10px;background:var(--dsw-alias-bg-layer-1)}
 .dgi-detail{flex:1 1 42%;min-width:0;min-height:0;max-height:calc(100vh - 230px);overflow:auto;border:1px solid var(--dsw-alias-border-l1);border-radius:10px;background:var(--dsw-alias-bg-layer-1);padding:12px}
 .dgi-detail h4{margin:0 0 6px;font-size:14px}
@@ -600,6 +601,40 @@ window.__ModuleLoader__.load({
 
     // -------------------------------------------------------------- 独立面板
 
+    // 面板出错时不要把整块区域留白：显示原因与堆栈，便于定位（也避免"打开就是空白"）
+    class PanelBoundary extends React.Component {
+      constructor(props) {
+        super(props)
+        this.state = { error: null }
+      }
+
+      static getDerivedStateFromError(error) {
+        return { error }
+      }
+
+      componentDidCatch(error, info) {
+        try { console.error('[dsh-gitlab-issues] 面板渲染失败', error, info) } catch { /* ignore */ }
+      }
+
+      render() {
+        const error = this.state.error
+        if (!error) return this.props.children
+        const message = error && error.message ? error.message : String(error)
+        const stack = error && error.stack ? String(error.stack) : ''
+        return h('div', { className: 'dgi-panel' },
+          h('div', { className: 'dgi-panel-head' },
+            h('span', { className: 'dgi-panel-title' }, '议题面板渲染失败')),
+          h('div', { className: 'dgi-hint' }, message),
+          h('pre', { className: 'dgi-pre' }, stack.slice(0, 3000)),
+          h('div', { className: 'dgi-inline' },
+            h('button', {
+              className: 'dgi-btn',
+              onClick: () => this.setState({ error: null }),
+            }, '重试')),
+        )
+      }
+    }
+
     function IssuesPanel(props) {
       const ctx = props.ctx
       const [projects, setProjects] = useState([])
@@ -994,22 +1029,6 @@ window.__ModuleLoader__.load({
         }
       }, [confirm, detail, loadIssues, openDetail])
 
-      if (projects.length === 0) {
-        return h('div', { className: 'dgi-panel' },
-          h('div', { className: 'dgi-panel-head' }, h('span', { className: 'dgi-panel-title' }, '议题')),
-          h('div', { className: 'dgi-empty' }, error || '没有检测到公司 GitLab 工作区'),
-          h('div', { className: 'dgi-inline' },
-            h('button', { className: 'dgi-btn', onClick: () => void loadProjects() }, '重新扫描'),
-            h('button', {
-              className: 'dgi-btn',
-              onClick: () => {
-                try { if (ctx && ctx.layout) ctx.layout.selectPanel('settings') } catch { /* 面板名不可用就忽略 */ }
-              },
-            }, '打开设置'),
-          ),
-        )
-      }
-
       const toggleSelect = useCallback((issue) => {
         setSelectedIids((list) => (list.includes(issue.iid)
           ? list.filter((n) => n !== issue.iid)
@@ -1064,6 +1083,25 @@ window.__ModuleLoader__.load({
           setNotice(err && err.message ? err.message : '生成提示词失败')
         }
       }, [selected, selectedIids])
+
+      // ⚠️ 所有 hook 必须写在这个提前 return 之前：否则 projects 空/非空两条渲染路径的
+      // hook 数量不一致，React 会抛 #310（Rendered more hooks than during the previous render），
+      // 整个面板直接崩成空白。
+      if (projects.length === 0) {
+        return h('div', { className: 'dgi-panel' },
+          h('div', { className: 'dgi-panel-head' }, h('span', { className: 'dgi-panel-title' }, '议题')),
+          h('div', { className: 'dgi-empty' }, error || '没有检测到公司 GitLab 工作区'),
+          h('div', { className: 'dgi-inline' },
+            h('button', { className: 'dgi-btn', onClick: () => void loadProjects() }, '重新扫描'),
+            h('button', {
+              className: 'dgi-btn',
+              onClick: () => {
+                try { if (ctx && ctx.layout) ctx.layout.selectPanel('settings') } catch { /* 面板名不可用就忽略 */ }
+              },
+            }, '打开设置'),
+          ),
+        )
+      }
 
       const pager = h('div', { className: 'dgi-pager' },
         issues.length > perPage
@@ -1595,7 +1633,7 @@ window.__ModuleLoader__.load({
       slots.inject('main', () => slots.register({
         name: 'main',
         key: 'gitlab-issues',
-      }, () => h(IssuesPanel, { ctx })))
+      }, () => h(PanelBoundary, null, h(IssuesPanel, { ctx }))))
 
       slots.inject('sidebar.panellist', () => slots.register({
         name: 'sidebar.panellist',
