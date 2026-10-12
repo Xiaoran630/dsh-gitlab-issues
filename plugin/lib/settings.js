@@ -29,6 +29,9 @@ export function defaultSettings() {
     token: '',
     injectPrompt: true,
     pollSeconds: 60,
+    // 默认筛选用户：0 表示不筛选（全部）；名字只用于界面显示
+    defaultAssigneeId: 0,
+    defaultAssigneeName: '',
   }
 }
 
@@ -39,6 +42,7 @@ function sanitize(raw) {
     ? input.hosts.map((h) => String(h ?? '').trim()).filter(Boolean)
     : base.hosts
   const poll = Number.parseInt(String(input.pollSeconds ?? base.pollSeconds), 10)
+  const assigneeRaw = Number.parseInt(String(input.defaultAssigneeId ?? base.defaultAssigneeId), 10)
   return {
     version: 1,
     enabled: input.enabled !== false,
@@ -47,6 +51,10 @@ function sanitize(raw) {
     token: typeof input.token === 'string' ? input.token.trim() : '',
     injectPrompt: input.injectPrompt !== false,
     pollSeconds: Number.isFinite(poll) ? Math.min(Math.max(poll, 15), 600) : base.pollSeconds,
+    defaultAssigneeId: Number.isFinite(assigneeRaw) && assigneeRaw > 0 ? assigneeRaw : 0,
+    defaultAssigneeName: typeof input.defaultAssigneeName === 'string'
+      ? input.defaultAssigneeName.trim().slice(0, 80)
+      : '',
   }
 }
 
@@ -88,6 +96,8 @@ export function publicSettings(settings, tokenConfigured) {
     tokenHint: token ? maskToken(token) : '',
     injectPrompt: s.injectPrompt,
     pollSeconds: s.pollSeconds,
+    defaultAssigneeId: Number(s.defaultAssigneeId) || 0,
+    defaultAssigneeName: String(s.defaultAssigneeName || ''),
     settingsPath: settingsPath(),
   }
 }

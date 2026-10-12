@@ -11,7 +11,8 @@
 | 自动识别 | 从会话工作区目录向上找 `.git`（含 worktree 的 `.git` 文件），解析 remote 判断是否公司 GitLab；**不跑 git 命令、不弹窗** |
 | 会话内入口 | 命中的会话在**输入框工具行**里多一个小按钮「议题 N」，点开是插件自绘的浮层：列表 + 刷新 + 全部议题 + 新建议题 |
 | 一键开工 | 点一条议题 → 开工提示词填入输入框（**不自动发送**，你确认后回车） |
-| 独立面板 | 左侧栏「议题」入口：项目选择 / 状态·标签·关键词·只看我的 筛选 / 详情 / 评论 / **编辑** / 关闭·重开 / **删除** / **手动新建** |
+| 独立面板 | 左侧栏「议题」入口：项目选择 / 状态·标签·关键词·**用户** 筛选 / 详情 / 评论 / **编辑** / 关闭·重开 / **删除** / **手动新建** |
+| 用户筛选 | 浮层与面板都带「用户筛选」下拉（全部用户 / 具体成员，当前账号标「我 ·」）；**设置里可配默认用户**，打开就按他筛，随时能手动改成别人或「全部用户」 |
 | Agent 工具 | 4 个工具按会话注册，写操作先走 DSH 审批 |
 | 上下文注入 | 命中的会话自动带上「本工作区项目 + 打开议题摘要」（默认 ≤12 条，同步读缓存，不打网络） |
 
@@ -63,8 +64,9 @@ plugin_manager install_bundle  target = <本仓库>/plugin
 ```
 GET  /dsh-gitlab-issues/api/state?sessionId=     会话工作区的仓库/项目/议题摘要
 GET  /dsh-gitlab-issues/api/projects             已知工作区扫描出的公司项目
-GET  /dsh-gitlab-issues/api/issues?project=&...  议题列表（状态/标签/关键词/只看我的）
+GET  /dsh-gitlab-issues/api/issues?project=&...  议题列表（状态/标签/关键词/**assigneeId**）
 GET  /dsh-gitlab-issues/api/issue?project=&iid=&notes=1
+GET  /dsh-gitlab-issues/api/user?project=        当前登录账号（设置页「用当前登录账号」）
 GET  /dsh-gitlab-issues/api/labels?project=      标签字典分组（complexity / type / others）
 GET  /dsh-gitlab-issues/api/members?project=     可指派成员
 GET  /dsh-gitlab-issues/api/prepare?sessionId=&iid=       开工提示词
@@ -124,9 +126,14 @@ node --test test/*.test.mjs     # 17 passed
   "tokenRef": "GITLAB_TOKEN",
   "token": "",
   "injectPrompt": true,
-  "pollSeconds": 60
+  "pollSeconds": 60,
+  "defaultAssigneeId": 0,
+  "defaultAssigneeName": ""
 }
 ```
+
+`defaultAssigneeId` 就是「默认筛选用户」：`0` 表示不筛选（全部）。设置页里的「用当前登录账号」会调 `GET /api/user` 把它设成你自己；
+也可以从任一已知项目的成员列表里挑。它只决定**默认值**，浮层/面板里随时能改。
 
 ## 界面落点的设计约束（重要，别踩）
 

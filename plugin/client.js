@@ -61,6 +61,7 @@ window.__ModuleLoader__.load({
 .dgi-panel-head{display:flex;align-items:center;gap:8px;flex-wrap:wrap}
 .dgi-panel-title{font-size:15px;font-weight:600}
 .dgi-input,.dgi-select{background:var(--dsw-alias-bg-layer-1);color:var(--dsw-alias-label-primary);border:1px solid var(--dsw-alias-border-l1);border-radius:8px;padding:5px 9px;font-size:13px;font-family:inherit;outline:none}
+.dgi-select-sm{height:26px;padding:0 6px;font-size:12px;max-width:150px}
 .dgi-input:focus,.dgi-select:focus{border-color:var(--dsw-alias-brand-primary)}
 .dgi-split{display:flex;gap:12px;flex:1 1 auto;min-height:0}
 .dgi-list{flex:1 1 58%;min-width:0;overflow:auto;border:1px solid var(--dsw-alias-border-l1);border-radius:10px;background:var(--dsw-alias-bg-layer-1)}
@@ -289,10 +290,13 @@ window.__ModuleLoader__.load({
       const [busy, setBusy] = useState(false)
       const [notice, setNotice] = useState('')
       const [anchor, setAnchor] = useState(null)
+      const [assigneeId, setAssigneeId] = useState(0)
+      const [members, setMembers] = useState([])
       const alive = useRef(true)
       const dockEntry = useRef(null)
       const triggerRef = useRef(null)
       const popRef = useRef(null)
+      const defaultApplied = useRef(false)
 
       // 宿主通过 standardProps 直接给到 inputActions（官方途径）；自己解析 conversation.input.for 只作兜底
       const actionsResolver = useCallback(() => {
@@ -312,6 +316,12 @@ window.__ModuleLoader__.load({
           const next = await api('/api/state?sessionId=' + encodeURIComponent(sessionId) + (refresh ? '&refresh=1' : ''))
           if (!alive.current) return
           setData(next)
+          // 首次拿到设置里的「默认筛选用户」就应用它（之后用户手选的优先）
+          if (!defaultApplied.current) {
+            defaultApplied.current = true
+            const preferred = Number(next && next.defaultAssigneeId) || 0
+            if (preferred > 0) setAssigneeId(preferred)
+          }
           if (dockEntry.current) dockEntry.current.updatedAt = Date.now()
           setError(next && next.error && !next.repo ? next.error : '')
         } catch (err) {
@@ -340,6 +350,24 @@ window.__ModuleLoader__.load({
         dockEntry.current = entry
         return registerDock(entry)
       }, [sessionId, projectPath, actionsResolver, draftReader])
+
+      // 用户筛选用：该项目可指派成员（拉不到就只显示「全部用户」）
+      useEffect(() => {
+        if (!projectPath) {
+          setMembers([])
+          return undefined
+        }
+        let aliveFlag = true
+        void (async () => {
+          try {
+            const res = await api('/api/members?project=' + encodeURIComponent(projectPath))
+            if (aliveFlag) setMembers((res && res.members) || [])
+          } catch {
+            if (aliveFlag) setMembers([])
+          }
+        })()
+        return () => { aliveFlag = false }
+      }, [projectPath])
 
       const pollSeconds = data && Number(data.pollSeconds) || 60
       const polling = !!(data && data.repo && data.tokenConfigured && data.enabled !== false)
@@ -422,9 +450,16 @@ window.__ModuleLoader__.load({
         return null
       }
 
-      const opened = data.issues ? data.issues.filter((i) => i.state === 'opened') : []
+      const openedAll = data.issues ? data.issues.filter((i) => i.state === 'opened') : []
+      const opened = assigneeId > 0
+        ? openedAll.filter((issue) => (issue.assignees || []).some((a) => Number(a && a.id) === assigneeId))
+        : openedAll
       const visible = opened.slice(0, 10)
       const repo = data.repo
+      const memberName = (id) => {
+        const hit = members.find((m) => Number(m.id) === Number(id))
+        return hit ? (hit.name || hit.username) : ''
+      }
 
       const trigger = h('button', {
         ref: triggerRef,
@@ -456,10 +491,40 @@ window.__ModuleLoader__.load({
         h('span', { className: 'dgi-title' }, `GitLab 议题 ${opened.length} 条`),
         h('span', { className: 'dgi-sub', title: repo.projectPath }, repo.projectPath),
         h('span', { className: 'dgi-spacer' }),
+        h('select', {
+          className: 'dgi-select dgi-select-sm',
+          value: String(assigneeId),
+          title: '按指派用户筛选',
+          onChange: (event) => setAssigneeId(Number.parseInt(event.target.value, 10) || 0),
+        }, [
+          h('option', { key: 'all', value: '0' }, '全部用户'),
+          ...members.map((member) => h('option', { key: 'u' + member.id, value: String(member.id) },
+            member.name || member.username)),
+        ]),
         h('button', { className: 'dgi-btn', onClick: () => void load(true), disabled: busy }, busy ? '刷新中…' : '刷新'),
-        h('button', { className: 'dgi-btn', onClick: () => { setOpen(false); if (ctx && ctx.layout) ctx.layout.selectPanel('gitlab-issues') } }, '全部议题'),
+        h('button', {
+          className: 'dgi-btn',
+          onClick: () => {
+            setOpen(false)
+            try {
+              const layout = (ctx && (ctx.layout || (typeof ctx.get === 'function' ? ctx.get('layout') : null))) || null
+              if (layout && typeof layout.selectPanel === 'function') {
+                layout.selectPanel('gitlab-issues')
+              } else {
+                setOpen(true)
+                setNotice('打不开独立面板（layout 服务不可用）—— 可以点左侧栏的「议题」图标')
+              }
+            } catch (error) {
+              setOpen(true)
+              setNotice('打不开独立面板：' + (error && error.message ? error.message : String(error)))
+            }
+          },
+        }, '全部议题'),
         h('button', { className: 'dgi-btn primary', onClick: () => void fillCreateIntro() }, '＋ 新建议题'),
       ),
+      assigneeId > 0
+        ? h('div', { className: 'dgi-hint' }, `已按「${memberName(assigneeId) || ('用户 ' + assigneeId)}」筛选（全部 ${openedAll.length} 条）`)
+        : null,
       data.tokenConfigured ? null : h('div', { className: 'dgi-hint' }, '未配置令牌（设置 → GitLab 议题）'),
       notice ? h('div', { className: 'dgi-hint' }, notice) : null,
       data.error ? h('div', { className: 'dgi-hint' }, data.error) : null,
@@ -484,7 +549,11 @@ window.__ModuleLoader__.load({
       const [selected, setSelected] = useState(null)
       const [issues, setIssues] = useState([])
       const [total, setTotal] = useState(0)
-      const [filters, setFilters] = useState({ state: 'opened', search: '', labels: '', mine: false })
+      const [filters, setFilters] = useState({ state: 'opened', search: '', labels: '', assigneeId: 0 })
+      const [filterUsers, setFilterUsers] = useState([])
+      const [meId, setMeId] = useState(0)
+      const [defaultUserId, setDefaultUserId] = useState(0)
+      const defaultAppliedRef = useRef(false)
       const [detail, setDetail] = useState(null)
       const [notes, setNotes] = useState([])
       const [error, setError] = useState('')
@@ -505,6 +574,29 @@ window.__ModuleLoader__.load({
       const [labelsData, setLabelsData] = useState({ loaded: false, complexity: [], type: [], others: [] })
       const [labelsError, setLabelsError] = useState('')
 
+      // 用户筛选器的候选（项目成员）+ 当前账号 + 设置里的默认用户
+      const loadFilterData = useCallback(async (project) => {
+        if (!project) return
+        const query = new URLSearchParams({ project: project.projectPath, host: project.baseUrl })
+        const qs = query.toString()
+        const [membersRes, userRes, settingsRes] = await Promise.all([
+          api('/api/members?' + qs).catch(() => null),
+          api('/api/user?' + qs).catch(() => null),
+          api('/api/settings').catch(() => null),
+        ])
+        setFilterUsers((membersRes && membersRes.members) || [])
+        setMeId(Number(userRes && userRes.user && userRes.user.id) || 0)
+        const preferred = Number(settingsRes && settingsRes.settings && settingsRes.settings.defaultAssigneeId) || 0
+        setDefaultUserId(preferred)
+        // 默认用户只在首次生效，之后以用户手选的为准
+        if (preferred > 0 && !defaultAppliedRef.current) {
+          defaultAppliedRef.current = true
+          setFilters((f) => ({ ...f, assigneeId: f.assigneeId || preferred }))
+        } else {
+          defaultAppliedRef.current = true
+        }
+      }, [])
+
       const loadProjects = useCallback(async () => {
         try {
           const res = await api('/api/projects')
@@ -517,6 +609,12 @@ window.__ModuleLoader__.load({
           setError(err && err.message ? err.message : String(err))
         }
       }, [])
+
+      // 选中项目变化时刷新筛选器候选
+      useEffect(() => {
+        if (!selected) return
+        void loadFilterData(selected)
+      }, [selected, loadFilterData])
 
       useEffect(() => { void loadProjects() }, [loadProjects])
 
@@ -537,7 +635,7 @@ window.__ModuleLoader__.load({
             state: filters.state,
             search: filters.search,
             labels: filters.labels,
-            mine: filters.mine ? '1' : '',
+            assigneeId: filters.assigneeId > 0 ? String(filters.assigneeId) : '',
             limit: '100',
           })
           const res = await api('/api/issues?' + query.toString())
@@ -969,14 +1067,16 @@ window.__ModuleLoader__.load({
             value: filters.labels,
             onChange: (event) => setFilters((f) => ({ ...f, labels: event.target.value })),
           }),
-          h('label', { className: 'dgi-inline' },
-            h('input', {
-              type: 'checkbox',
-              checked: filters.mine,
-              onChange: (event) => setFilters((f) => ({ ...f, mine: event.target.checked })),
-            }),
-            h('span', { className: 'dgi-meta' }, '只看我的'),
-          ),
+          h('select', {
+            className: 'dgi-select',
+            value: String(filters.assigneeId),
+            title: '按指派用户筛选（默认用户可在「设置 → GitLab 议题」里配）',
+            onChange: (event) => setFilters((f) => ({ ...f, assigneeId: Number.parseInt(event.target.value, 10) || 0 })),
+          }, [
+            h('option', { key: 'all', value: '0' }, '全部用户'),
+            ...filterUsers.map((member) => h('option', { key: 'u' + member.id, value: String(member.id) },
+              (meId && Number(member.id) === meId ? '我 · ' : '') + (member.name || member.username))),
+          ]),
           h('button', { className: 'dgi-btn', onClick: () => void loadIssues(true), disabled: busy }, busy ? '刷新中…' : '刷新'),
           h('span', { className: 'dgi-meta' }, `共 ${total} 条`),
           h('button', { className: 'dgi-btn primary', onClick: () => void openCreate() }, '＋ 新建议题'),
@@ -1086,6 +1186,41 @@ window.__ModuleLoader__.load({
       const [token, setToken] = useState('')
       const [status, setStatus] = useState('')
       const [busy, setBusy] = useState(false)
+      const [defaultMembers, setDefaultMembers] = useState([])
+
+      // 默认用户的可选来源：任一已知项目的成员列表
+      const loadDefaultMembers = useCallback(async () => {
+        try {
+          const projRes = await api('/api/projects')
+          const first = (projRes && projRes.projects && projRes.projects[0]) || null
+          if (!first) return
+          const query = new URLSearchParams({ project: first.projectPath, host: first.baseUrl })
+          const res = await api('/api/members?' + query.toString())
+          setDefaultMembers((res && res.members) || [])
+        } catch { /* 拿不到就只留「用当前登录账号」这条路 */ }
+      }, [])
+
+      useEffect(() => { void loadDefaultMembers() }, [loadDefaultMembers])
+
+      const useCurrentAccount = useCallback(async () => {
+        setBusy(true)
+        setStatus('读取当前登录账号…')
+        try {
+          const res = await api('/api/user')
+          const user = res && res.user
+          if (!user || !user.id) throw new Error('没拿到账号信息（先确认令牌可用）')
+          const saved = await post('/api/settings', {
+            defaultAssigneeId: Number(user.id),
+            defaultAssigneeName: String(user.name || user.username || ''),
+          })
+          if (saved && saved.settings) setSettings(saved.settings)
+          setStatus(`默认筛选用户 = ${user.name || user.username}（id ${user.id}）`)
+        } catch (err) {
+          setStatus('设置失败：' + (err && err.message ? err.message : String(err)))
+        } finally {
+          setBusy(false)
+        }
+      }, [])
 
       const load = useCallback(async () => {
         try {
@@ -1203,6 +1338,36 @@ window.__ModuleLoader__.load({
             onChange: (event) => setHostsText(event.target.value),
           }),
           h('span', { className: 'dgi-field-help' }, '只有 remote 指向这里列出的地址时，插件才会工作（默认两条公司地址，同仓库的其它入口可自行追加）。'),
+        ),
+        h('div', { className: 'dgi-field' },
+          h('span', { className: 'dgi-field-label' }, '默认筛选用户（议题浮层与面板打开时默认按他筛）'),
+          h('div', { className: 'dgi-inline' },
+            h('span', { className: 'dgi-meta' },
+              settings.defaultAssigneeId > 0
+                ? `${settings.defaultAssigneeName || ('用户 ' + settings.defaultAssigneeId)}（id ${settings.defaultAssigneeId}）`
+                : '未设置 —— 默认看全部'),
+            h('button', { className: 'dgi-btn', disabled: busy, onClick: () => void useCurrentAccount() }, '用当前登录账号'),
+            h('select', {
+              className: 'dgi-select',
+              value: '',
+              disabled: busy || defaultMembers.length === 0,
+              onChange: (event) => {
+                const id = Number.parseInt(event.target.value, 10) || 0
+                if (id <= 0) return
+                const hit = defaultMembers.find((m) => Number(m.id) === id)
+                void save({ defaultAssigneeId: id, defaultAssigneeName: hit ? (hit.name || hit.username) : '' })
+              },
+            }, [
+              h('option', { key: 'pick', value: '' }, defaultMembers.length > 0 ? '从项目成员里选…' : '（没有已知项目）'),
+              ...defaultMembers.map((m) => h('option', { key: 'u' + m.id, value: String(m.id) }, m.name || m.username)),
+            ]),
+            h('button', {
+              className: 'dgi-btn',
+              disabled: busy || !settings.defaultAssigneeId,
+              onClick: () => void save({ defaultAssigneeId: 0, defaultAssigneeName: '' }),
+            }, '清除（=全部）'),
+          ),
+          h('span', { className: 'dgi-field-help' }, '浮层与面板里的「用户筛选」下拉仍可随时改成别人或「全部用户」，这里只决定默认值。'),
         ),
         h('div', { className: 'dgi-inline' },
           h('button', {

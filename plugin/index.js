@@ -749,6 +749,8 @@ export function apply(ctx, config = {}) {
       cwd: null,
       enabled: settings.enabled,
       tokenConfigured: await tokenConfigured(),
+      defaultAssigneeId: Number(settings.defaultAssigneeId) || 0,
+      defaultAssigneeName: String(settings.defaultAssigneeName || ''),
       repo: null,
       project: null,
       issues: [],
@@ -843,12 +845,16 @@ export function apply(ctx, config = {}) {
         }
         const limit = Math.min(Math.max(Number.parseInt(url.searchParams.get('limit') || '100', 10) || 100, 1), 100)
         const info = await getProjectCached(repo).catch(() => null)
+        const mineFlag = url.searchParams.get('mine') === '1'
+        const assigneeParam = Number.parseInt(url.searchParams.get('assigneeId') || '', 10)
         const result = await api.listIssues(repo.baseUrl, repo.projectPath, {
           state: url.searchParams.get('state') || 'opened',
           labels: url.searchParams.get('labels') || '',
           search: url.searchParams.get('search') || '',
-          mine: url.searchParams.get('mine') === '1',
+          mine: mineFlag,
           mineId: info?.me?.id,
+          // 明确传了 assigneeId 就按它筛（界面上的「用户筛选」）；否则沿用「只看我的」
+          assigneeId: Number.isInteger(assigneeParam) && assigneeParam > 0 ? assigneeParam : '',
           perPage: limit,
         })
         json(res, {
@@ -886,6 +892,31 @@ export function apply(ctx, config = {}) {
             }))
         }
         json(res, { ok: true, issue, notes })
+        return
+      }
+
+      if (method === 'GET' && action === '/api/user') {
+        // 设置页「用当前登录账号」：不要求 project，缺省用白名单第一个地址
+        const repo = resolveRepoByProject(
+          url.searchParams.get('project'),
+          url.searchParams.get('host'),
+          url.searchParams.get('sessionId') || undefined,
+        )
+        const host = normalizeHost(
+          (repo && repo.hostPort) || url.searchParams.get('host') || currentSettings().hosts[0] || DEFAULT_COMPANY_HOSTS[0],
+        )
+        const baseUrl = `http://${host}`
+        try {
+          const me = await api.getCurrentUser(baseUrl)
+          json(res, {
+            ok: true,
+            user: me
+              ? { id: Number(me.id), name: String(me.name ?? ''), username: String(me.username ?? '') }
+              : null,
+          })
+        } catch (error) {
+          json(res, { ok: false, error: describeError(error) })
+        }
         return
       }
 
@@ -1023,6 +1054,8 @@ export function apply(ctx, config = {}) {
           if (body.pollSeconds !== undefined) patch.pollSeconds = body.pollSeconds
           if (Array.isArray(body.hosts)) patch.hosts = body.hosts
           if (typeof body.tokenRef === 'string' && body.tokenRef.trim()) patch.tokenRef = body.tokenRef.trim()
+          if (body.defaultAssigneeId !== undefined) patch.defaultAssigneeId = body.defaultAssigneeId
+          if (body.defaultAssigneeName !== undefined) patch.defaultAssigneeName = body.defaultAssigneeName
 
           let tokenSavedTo = null
           if (typeof body.token === 'string' && body.token.trim()) {
