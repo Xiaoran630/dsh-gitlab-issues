@@ -1,0 +1,6 @@
+{
+  "meta": {
+    "title": "GitLab Issues",
+    "description": "When the workspace remote points at the company GitLab, every session shows that project's issues: click one to drop a work prompt into the composer, or let the DSH agent create a new issue to company spec."
+  }
+}

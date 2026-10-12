@@ -1,0 +1,6 @@
+# dsh-gitlab-issues bundle patch：Host 插件（探测工作区仓库 + 议题工具 + HTTP 路由）
+# 与 Client 半（会话内议题条 / 独立议题面板 / 设置页）。
+# 纯 insert（id/name）可热挂载；name 必须是真实包名，写错会 Cannot find package。
+- insert:
+    - id: dsh-gitlab-issues
+      name: dsh-gitlab-issues
