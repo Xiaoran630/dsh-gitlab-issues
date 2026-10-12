@@ -22,6 +22,36 @@ export function buildWorkPrompt({ issue, repo }) {
   return lines.join('\n')
 }
 
+/**
+ * 多条议题一起开工：把勾选的议题按顺序列出来，让 agent 一条一条做。
+ * 每条仍然要求"先拉描述与验收标准"，并且一次提交只关联一个议题。
+ */
+export function buildMultiWorkPrompt({ repo, issues }) {
+  const list = (Array.isArray(issues) ? issues : []).filter(Boolean)
+  if (list.length === 0) return ''
+  const lines = [
+    `按公司 GitLab 议题开工，本次要连续完成这 ${list.length} 条（建议就按下面顺序做）：`,
+    '',
+  ]
+  list.forEach((issue, index) => {
+    const labels = Array.isArray(issue.labels) && issue.labels.length > 0 ? `（${issue.labels.join('、')}）` : ''
+    const who = Array.isArray(issue.assignees) && issue.assignees.length > 0
+      ? `，指派 ${issue.assignees.map((a) => a.name || a.username).join('/')}`
+      : ''
+    const due = issue.due_date ? `，截止 ${issue.due_date}` : ''
+    lines.push(`${index + 1}. #${issue.iid} ${issue.title}${labels}${who}${due}`)
+  })
+  if (repo?.projectPath) {
+    lines.push('', `项目：${repo.projectPath}（${repo.baseUrl}）`)
+  }
+  lines.push('')
+  lines.push('要求：')
+  lines.push('- 每条都**先用 gitlab_issue 拉取完整描述与验收标准**，再开始实现；做完一条再做下一条。')
+  lines.push('- 一次提交只关联一个议题，提交信息带对应的 #编号。')
+  lines.push('- 哪条卡住就在回复里说明原因，不要跳过验收标准。')
+  return lines.join('\n')
+}
+
 /** 新建议题：把需求原文交给 DSH agent，由它补齐五必填后调用 gitlab_issue_create。 */
 export function buildCreateIssuePrompt({ repo, requirement, dueDate }) {
   const text = String(requirement ?? '').trim()

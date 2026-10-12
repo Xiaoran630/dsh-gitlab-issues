@@ -36,6 +36,7 @@ window.__ModuleLoader__.load({
 .dgi-trigger.on{color:var(--dsw-alias-brand-primary);border-color:var(--dsw-alias-brand-primary)}
 .dgi-pop{position:fixed;z-index:80;box-sizing:border-box;max-height:min(60vh,520px);overflow:auto;padding:6px;border:1px solid var(--dsw-alias-border-l1);border-radius:12px;background:var(--dsw-alias-bg-overlay);color:var(--dsw-alias-label-primary);font-size:13px;line-height:20px;box-shadow:0 12px 36px rgba(0,0,0,.28)}
 .dgi-pop-head{display:flex;align-items:center;gap:8px;flex-wrap:wrap;padding:4px 4px 8px;border-bottom:1px solid var(--dsw-alias-border-l1);margin-bottom:4px}
+.dgi-pager{display:flex;align-items:center;gap:8px;flex-wrap:wrap;padding:6px 4px;border-top:1px solid var(--dsw-alias-border-l1);margin-top:4px}
 .dgi-dot{width:7px;height:7px;border-radius:50%;background:var(--dsw-alias-brand-primary);flex:none}
 .dgi-title{font-weight:500}
 .dgi-sub{color:var(--dsw-alias-label-secondary);font-size:12px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:38%}
@@ -48,6 +49,8 @@ window.__ModuleLoader__.load({
 .dgi-body{border-top:1px solid var(--dsw-alias-border-l1);max-height:300px;overflow:auto;padding:4px 0}
 .dgi-row{display:flex;align-items:center;gap:8px;padding:5px 10px;cursor:pointer}
 .dgi-row:hover{background:var(--dsw-alias-bg-layer-2)}
+.dgi-row.picked{background:color-mix(in srgb, var(--dsw-alias-brand-primary) 12%, transparent)}
+.dgi-check{flex:none;margin:0;cursor:pointer}
 .dgi-iid{color:var(--dsw-alias-label-secondary);font-size:12px;flex:none;min-width:34px}
 .dgi-rtitle{flex:1 1 auto;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .dgi-chip{border:1px solid var(--dsw-alias-border-l1);border-radius:6px;padding:0 5px;font-size:11px;color:var(--dsw-alias-label-secondary);flex:none}
@@ -57,15 +60,15 @@ window.__ModuleLoader__.load({
 .dgi-textarea{width:100%;box-sizing:border-box;background:var(--dsw-alias-bg-layer-1);color:var(--dsw-alias-label-primary);border:1px solid var(--dsw-alias-border-l1);border-radius:8px;padding:6px 8px;font-size:13px;font-family:inherit;resize:vertical;outline:none}
 .dgi-textarea:focus{border-color:var(--dsw-alias-brand-primary)}
 .dgi-notice{color:var(--dsw-alias-label-secondary);font-size:12px}
-.dgi-panel{display:flex;flex-direction:column;gap:10px;padding:16px 20px;font-size:13px;color:var(--dsw-alias-label-primary);height:100%;box-sizing:border-box;overflow:hidden}
-.dgi-panel-head{display:flex;align-items:center;gap:8px;flex-wrap:wrap}
+.dgi-panel{display:flex;flex-direction:column;gap:10px;padding:16px 20px;font-size:13px;color:var(--dsw-alias-label-primary);height:100%;min-height:0;box-sizing:border-box;overflow:hidden}
+.dgi-panel-head{display:flex;align-items:center;gap:8px;flex-wrap:wrap;flex:none}
 .dgi-panel-title{font-size:15px;font-weight:600}
 .dgi-input,.dgi-select{background:var(--dsw-alias-bg-layer-1);color:var(--dsw-alias-label-primary);border:1px solid var(--dsw-alias-border-l1);border-radius:8px;padding:5px 9px;font-size:13px;font-family:inherit;outline:none}
 .dgi-select-sm{height:26px;padding:0 6px;font-size:12px;max-width:150px}
 .dgi-input:focus,.dgi-select:focus{border-color:var(--dsw-alias-brand-primary)}
-.dgi-split{display:flex;gap:12px;flex:1 1 auto;min-height:0}
-.dgi-list{flex:1 1 58%;min-width:0;overflow:auto;border:1px solid var(--dsw-alias-border-l1);border-radius:10px;background:var(--dsw-alias-bg-layer-1)}
-.dgi-detail{flex:1 1 42%;min-width:0;overflow:auto;border:1px solid var(--dsw-alias-border-l1);border-radius:10px;background:var(--dsw-alias-bg-layer-1);padding:12px}
+.dgi-split{display:flex;gap:12px;flex:1 1 auto;min-height:0;overflow:hidden}
+.dgi-list{flex:1 1 58%;min-width:0;min-height:0;max-height:calc(100vh - 230px);overflow:auto;border:1px solid var(--dsw-alias-border-l1);border-radius:10px;background:var(--dsw-alias-bg-layer-1)}
+.dgi-detail{flex:1 1 42%;min-width:0;min-height:0;max-height:calc(100vh - 230px);overflow:auto;border:1px solid var(--dsw-alias-border-l1);border-radius:10px;background:var(--dsw-alias-bg-layer-1);padding:12px}
 .dgi-detail h4{margin:0 0 6px;font-size:14px}
 .dgi-kv{display:flex;gap:6px;flex-wrap:wrap;margin:6px 0}
 .dgi-desc{white-space:pre-wrap;word-break:break-word;font-size:13px;line-height:21px;margin:8px 0}
@@ -189,10 +192,23 @@ window.__ModuleLoader__.load({
     function IssueRow(props) {
       const issue = props.issue
       const parsed = splitLabels(issue.labels)
-      const children = [
+      const children = []
+      if (props.selectable) {
+        children.push(h('input', {
+          type: 'checkbox',
+          key: 'sel',
+          className: 'dgi-check',
+          checked: !!props.checked,
+          'aria-label': `选择议题 #${issue.iid}`,
+          title: '勾选后可多条一起开工',
+          onClick: (event) => event.stopPropagation(),
+          onChange: () => { if (props.onToggle) props.onToggle(issue) },
+        }))
+      }
+      children.push(
         h('span', { className: 'dgi-iid', key: 'iid' }, '#' + issue.iid),
         h('span', { className: 'dgi-rtitle', key: 'title', title: issue.title }, issue.title),
-      ]
+      )
       if (parsed.complexity) children.push(h('span', { className: 'dgi-chip', key: 'cx' }, parsed.complexity))
       if (parsed.type) children.push(h('span', { className: 'dgi-chip', key: 'ty' }, parsed.type))
       for (const extra of parsed.rest.slice(0, 2)) children.push(h('span', { className: 'dgi-chip', key: 'l-' + extra }, extra))
@@ -209,7 +225,7 @@ window.__ModuleLoader__.load({
         }, '编辑'))
       }
       return h('div', {
-        className: 'dgi-row',
+        className: 'dgi-row' + (props.selectable && props.checked ? ' picked' : ''),
         role: 'button',
         tabIndex: 0,
         onClick: () => props.onPick && props.onPick(issue),
@@ -292,6 +308,8 @@ window.__ModuleLoader__.load({
       const [anchor, setAnchor] = useState(null)
       const [assigneeId, setAssigneeId] = useState(0)
       const [members, setMembers] = useState([])
+      const [page, setPage] = useState(1)
+      const [selectedIids, setSelectedIids] = useState([])
       const alive = useRef(true)
       const dockEntry = useRef(null)
       const triggerRef = useRef(null)
@@ -443,6 +461,28 @@ window.__ModuleLoader__.load({
         }
       }, [sessionId, setDraft])
 
+      // 多选：勾若干条议题，合成一段"连续开工"的提示词填进输入框
+      const toggleSelect = useCallback((issue) => {
+        setSelectedIids((list) => (list.includes(issue.iid)
+          ? list.filter((n) => n !== issue.iid)
+          : [...list, issue.iid]))
+      }, [])
+
+      const fillMultiWork = useCallback(async () => {
+        const iids = selectedIids.slice().sort((a, b) => a - b)
+        if (iids.length === 0) return
+        setNotice('')
+        try {
+          const res = await api('/api/prepare?sessionId=' + encodeURIComponent(sessionId) + '&iids=' + iids.join(','))
+          if (res && res.prompt) {
+            setDraft(res.prompt)
+            setNotice(`已把 ${iids.length} 条议题的开工提示词填入输入框（不自动发送）`)
+          }
+        } catch (err) {
+          setNotice(err && err.message ? err.message : '生成提示词失败')
+        }
+      }, [selectedIids, sessionId, setDraft])
+
       if (!data || data.enabled === false || !data.repo) {
         if (error && data === null) {
           console.warn('[dsh-gitlab-issues] state 读取失败：' + error)
@@ -454,7 +494,10 @@ window.__ModuleLoader__.load({
       const opened = assigneeId > 0
         ? openedAll.filter((issue) => (issue.assignees || []).some((a) => Number(a && a.id) === assigneeId))
         : openedAll
-      const visible = opened.slice(0, 10)
+      const perPage = 8
+      const totalPages = Math.max(1, Math.ceil(opened.length / perPage))
+      const currentPage = Math.min(page, totalPages)
+      const visible = opened.slice((currentPage - 1) * perPage, currentPage * perPage)
       const repo = data.repo
       const memberName = (id) => {
         const hit = members.find((m) => Number(m.id) === Number(id))
@@ -495,31 +538,13 @@ window.__ModuleLoader__.load({
           className: 'dgi-select dgi-select-sm',
           value: String(assigneeId),
           title: '按指派用户筛选',
-          onChange: (event) => setAssigneeId(Number.parseInt(event.target.value, 10) || 0),
+          onChange: (event) => { setAssigneeId(Number.parseInt(event.target.value, 10) || 0); setPage(1) },
         }, [
           h('option', { key: 'all', value: '0' }, '全部用户'),
           ...members.map((member) => h('option', { key: 'u' + member.id, value: String(member.id) },
             member.name || member.username)),
         ]),
         h('button', { className: 'dgi-btn', onClick: () => void load(true), disabled: busy }, busy ? '刷新中…' : '刷新'),
-        h('button', {
-          className: 'dgi-btn',
-          onClick: () => {
-            setOpen(false)
-            try {
-              const layout = (ctx && (ctx.layout || (typeof ctx.get === 'function' ? ctx.get('layout') : null))) || null
-              if (layout && typeof layout.selectPanel === 'function') {
-                layout.selectPanel('gitlab-issues')
-              } else {
-                setOpen(true)
-                setNotice('打不开独立面板（layout 服务不可用）—— 可以点左侧栏的「议题」图标')
-              }
-            } catch (error) {
-              setOpen(true)
-              setNotice('打不开独立面板：' + (error && error.message ? error.message : String(error)))
-            }
-          },
-        }, '全部议题'),
         h('button', { className: 'dgi-btn primary', onClick: () => void fillCreateIntro() }, '＋ 新建议题'),
       ),
       assigneeId > 0
@@ -530,11 +555,44 @@ window.__ModuleLoader__.load({
       data.error ? h('div', { className: 'dgi-hint' }, data.error) : null,
       visible.length === 0
         ? h('div', { className: 'dgi-empty' }, data.tokenConfigured ? '当前没有打开的议题' : '配置令牌后即可看到议题')
-        : visible.map((issue) => h(IssueRow, { key: issue.iid, issue, onPick: fillWork })),
-      opened.length > visible.length
-        ? h('div', { className: 'dgi-hint' }, `还有 ${opened.length - visible.length} 条，点「全部议题」查看`)
-        : null,
-      h('div', { className: 'dgi-hint' }, '点一条议题 → 开工提示词填入输入框（不会自动发送）'))
+        : visible.map((issue) => h(IssueRow, {
+          key: issue.iid,
+          issue,
+          selectable: true,
+          checked: selectedIids.includes(issue.iid),
+          onToggle: toggleSelect,
+          onPick: fillWork,
+        })),
+      h('div', { className: 'dgi-pager' },
+        opened.length > perPage
+          ? [
+            h('button', { className: 'dgi-btn', key: 'prev', disabled: currentPage <= 1, onClick: () => setPage(currentPage - 1) }, '上一页'),
+            h('span', { className: 'dgi-meta', key: 'info' }, `${currentPage} / ${totalPages} 页 · 共 ${opened.length} 条`),
+            h('button', { className: 'dgi-btn', key: 'next', disabled: currentPage >= totalPages, onClick: () => setPage(currentPage + 1) }, '下一页'),
+          ]
+          : h('span', { className: 'dgi-meta', key: 'info' }, `共 ${opened.length} 条`),
+        h('span', { className: 'dgi-spacer', key: 'sp' }),
+        h('button', {
+          className: 'dgi-btn',
+          key: 'all',
+          disabled: visible.length === 0,
+          onClick: () => setSelectedIids((list) => {
+            const ids = visible.map((i) => i.iid)
+            const allOn = ids.length > 0 && ids.every((n) => list.includes(n))
+            return allOn ? list.filter((n) => !ids.includes(n)) : Array.from(new Set([...list, ...ids]))
+          }),
+        }, '全选本页'),
+        selectedIids.length > 0
+          ? h('button', { className: 'dgi-btn', key: 'clear', onClick: () => setSelectedIids([]) }, '清空')
+          : null,
+        h('button', {
+          className: 'dgi-btn primary',
+          key: 'go',
+          disabled: selectedIids.length === 0,
+          onClick: () => void fillMultiWork(),
+        }, `一起开工${selectedIids.length > 0 ? `（${selectedIids.length}）` : ''}`),
+      ),
+      h('div', { className: 'dgi-hint' }, '点议题 = 单条开工；勾选多条 = 「一起开工」（都是填进输入框，不自动发送）'))
 
       return h(React.Fragment, null, trigger,
         ReactDOM && ReactDOM.createPortal ? ReactDOM.createPortal(popover, document.body) : popover)
@@ -549,6 +607,8 @@ window.__ModuleLoader__.load({
       const [selected, setSelected] = useState(null)
       const [issues, setIssues] = useState([])
       const [total, setTotal] = useState(0)
+      const [page, setPage] = useState(1)
+      const [selectedIids, setSelectedIids] = useState([])
       const [filters, setFilters] = useState({ state: 'opened', search: '', labels: '', assigneeId: 0 })
       const [filterUsers, setFilterUsers] = useState([])
       const [meId, setMeId] = useState(0)
@@ -641,6 +701,7 @@ window.__ModuleLoader__.load({
           const res = await api('/api/issues?' + query.toString())
           setIssues((res && res.items) || [])
           setTotal((res && res.total) || 0)
+          setPage(1)
         } catch (err) {
           setError(err && err.message ? err.message : String(err))
         } finally {
@@ -949,15 +1010,89 @@ window.__ModuleLoader__.load({
         )
       }
 
+      const toggleSelect = useCallback((issue) => {
+        setSelectedIids((list) => (list.includes(issue.iid)
+          ? list.filter((n) => n !== issue.iid)
+          : [...list, issue.iid]))
+      }, [])
+
+      const perPage = 20
+      const pageCount = Math.max(1, Math.ceil(issues.length / perPage))
+      const currentPage = Math.min(page, pageCount)
+      const pageItems = issues.slice((currentPage - 1) * perPage, currentPage * perPage)
       const list = h('div', { className: 'dgi-list' },
         busy && issues.length === 0 ? h('div', { className: 'dgi-empty' }, '加载中…') : null,
         !busy && issues.length === 0 ? h('div', { className: 'dgi-empty' }, '没有匹配的议题') : null,
-        issues.map((issue) => h(IssueRow, {
+        pageItems.map((issue) => h(IssueRow, {
           key: issue.iid,
           issue,
+          selectable: true,
+          checked: selectedIids.includes(issue.iid),
+          onToggle: toggleSelect,
           onPick: (picked) => { void openDetail(picked) },
           onEdit: (picked) => { void startEdit(picked) },
         })),
+      )
+
+      // 多选一起开工：面板里没有 sessionId，靠会话内入口登记表把提示词送进对应会话
+      const fillMultiWork = useCallback(async () => {
+        if (!selected) return
+        const iids = selectedIids.slice().sort((a, b) => a - b)
+        if (iids.length === 0) return
+        try {
+          const query = new URLSearchParams({
+            project: selected.projectPath,
+            host: selected.baseUrl,
+            iids: iids.join(','),
+          })
+          const res = await api('/api/prepare?' + query.toString())
+          const prompt = (res && res.prompt) || ''
+          if (!prompt) {
+            setNotice('生成提示词失败')
+            return
+          }
+          const entry = pickDock(selected.projectPath)
+          if (fillIntoDock(entry, prompt) === 'filled') {
+            setNotice(`已把 ${iids.length} 条议题的开工提示词填入该工作区会话的输入框（不自动发送）`)
+            return
+          }
+          const ok = await copyText(prompt)
+          setNotice(ok
+            ? `该工作区没有打开着的会话，${iids.length} 条议题的提示词已复制到剪贴板`
+            : '没有可用会话，请手动复制提示词')
+        } catch (err) {
+          setNotice(err && err.message ? err.message : '生成提示词失败')
+        }
+      }, [selected, selectedIids])
+
+      const pager = h('div', { className: 'dgi-pager' },
+        issues.length > perPage
+          ? [
+            h('button', { className: 'dgi-btn', key: 'prev', disabled: currentPage <= 1, onClick: () => setPage(currentPage - 1) }, '上一页'),
+            h('span', { className: 'dgi-meta', key: 'info' }, `第 ${currentPage} / ${pageCount} 页 · 共 ${issues.length} 条（服务端总计 ${total}）`),
+            h('button', { className: 'dgi-btn', key: 'next', disabled: currentPage >= pageCount, onClick: () => setPage(currentPage + 1) }, '下一页'),
+          ]
+          : h('span', { className: 'dgi-meta', key: 'info' }, `共 ${issues.length} 条（服务端总计 ${total}）`),
+        h('span', { className: 'dgi-spacer', key: 'sp' }),
+        h('button', {
+          className: 'dgi-btn',
+          key: 'all',
+          disabled: pageItems.length === 0,
+          onClick: () => setSelectedIids((list) => {
+            const ids = pageItems.map((i) => i.iid)
+            const allOn = ids.length > 0 && ids.every((n) => list.includes(n))
+            return allOn ? list.filter((n) => !ids.includes(n)) : Array.from(new Set([...list, ...ids]))
+          }),
+        }, '全选本页'),
+        selectedIids.length > 0
+          ? h('button', { className: 'dgi-btn', key: 'clear', onClick: () => setSelectedIids([]) }, '清空')
+          : null,
+        h('button', {
+          className: 'dgi-btn primary',
+          key: 'go',
+          disabled: selectedIids.length === 0,
+          onClick: () => void fillMultiWork(),
+        }, `一起开工${selectedIids.length > 0 ? `（${selectedIids.length}）` : ''}`),
       )
 
       const detailView = detail ? h('div', { className: 'dgi-detail' },
@@ -1085,8 +1220,9 @@ window.__ModuleLoader__.load({
         notice ? h('div', { className: 'dgi-notice-row dgi-hint' }, notice) : null,
         tokenReady ? null : h('div', { className: 'dgi-hint' }, '未配置 GitLab 令牌：请在「设置 → GitLab 议题」粘贴个人访问令牌（PAT），或设置环境变量 GITLAB_TOKEN。'),
         error ? h('div', { className: 'dgi-hint' }, error) : null,
-        h('div', { className: 'dgi-hint' }, '点一行看详情；行内「编辑」可改标题/描述/标签/指派/截止；详情里可评论、关闭·重开、删除。「＋ 新建议题」打开新建表单，复杂度与类型从项目标签字典里选。'),
+        h('div', { className: 'dgi-hint' }, '勾选多行 → 「一起开工」把这几条的开工提示词一次填进该工作区会话；点一行看详情；行内「编辑」可改标题/描述/标签/指派/截止；详情里可评论、关闭·重开、删除。'),
         h('div', { className: 'dgi-split' }, list, detailView),
+        pager,
         confirm ? h(ConfirmModal, {
           title: confirm.title,
           body: confirm.body,

@@ -27,7 +27,7 @@ import {
   validateCreateIssue,
 } from './lib/company-rules.js'
 import { LabelCatalog } from './lib/labels.js'
-import { buildWorkPrompt, buildCreateIssuePrompt, buildCreateIssueIntro } from './lib/prompt.js'
+import { buildWorkPrompt, buildMultiWorkPrompt, buildCreateIssuePrompt, buildCreateIssueIntro } from './lib/prompt.js'
 import { readSettings, writeSettings, publicSettings, TOKEN_REF } from './lib/settings.js'
 
 export const name = 'dsh-gitlab-issues'
@@ -1010,6 +1010,28 @@ export function apply(ctx, config = {}) {
         }
         if (requirement.trim()) {
           json(res, { ok: true, prompt: buildCreateIssuePrompt({ repo, requirement, dueDate: nextFriday() }) })
+          return
+        }
+        // 多选一起开工：iids=3,5,7
+        const iidsParam = url.searchParams.get('iids') || ''
+        if (iidsParam.trim()) {
+          const wanted = iidsParam
+            .split(',')
+            .map((s) => Number.parseInt(s.trim(), 10))
+            .filter((n) => Number.isInteger(n) && n > 0)
+          if (wanted.length === 0) {
+            json(res, { ok: false, error: 'iids 里没有有效编号' }, 400)
+            return
+          }
+          const picked = wanted.map((n) => cachedIssues.find((i) => i.iid === n) ?? {
+            iid: n,
+            title: `#${n}`,
+            labels: [],
+            assignees: [],
+            due_date: null,
+            web_url: `${repo.webUrl}/-/issues/${n}`,
+          })
+          json(res, { ok: true, prompt: buildMultiWorkPrompt({ repo, issues: picked }) })
           return
         }
         if (Number.isInteger(iid) && iid > 0) {
