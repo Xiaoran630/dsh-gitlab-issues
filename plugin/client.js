@@ -1053,11 +1053,12 @@ window.__ModuleLoader__.load({
         })),
       )
 
-      // 多选一起开工：面板里没有 sessionId，靠会话内入口登记表把提示词送进对应会话
-      const fillMultiWork = useCallback(async () => {
+      // 多选：面板这边跨会话、没有"当前对话框"，所以一律复制到剪贴板，不假装能填入
+      const copyMultiPrompt = useCallback(async () => {
         if (!selected) return
         const iids = selectedIids.slice().sort((a, b) => a - b)
         if (iids.length === 0) return
+        setNotice('')
         try {
           const query = new URLSearchParams({
             project: selected.projectPath,
@@ -1070,15 +1071,10 @@ window.__ModuleLoader__.load({
             setNotice('生成提示词失败')
             return
           }
-          const entry = pickDock(selected.projectPath)
-          if (fillIntoDock(entry, prompt) === 'filled') {
-            setNotice(`已把 ${iids.length} 条议题的开工提示词填入该工作区会话的输入框（不自动发送）`)
-            return
-          }
           const ok = await copyText(prompt)
           setNotice(ok
-            ? `该工作区没有打开着的会话，${iids.length} 条议题的提示词已复制到剪贴板`
-            : '没有可用会话，请手动复制提示词')
+            ? `已复制 ${iids.length} 条议题的开工提示词到剪贴板（去会话输入框粘贴即可）`
+            : '复制失败，请手动复制')
         } catch (err) {
           setNotice(err && err.message ? err.message : '生成提示词失败')
         }
@@ -1129,8 +1125,8 @@ window.__ModuleLoader__.load({
           className: 'dgi-btn primary',
           key: 'go',
           disabled: selectedIids.length === 0,
-          onClick: () => void fillMultiWork(),
-        }, `一起开工${selectedIids.length > 0 ? `（${selectedIids.length}）` : ''}`),
+          onClick: () => void copyMultiPrompt(),
+        }, `复制提示词${selectedIids.length > 0 ? `（${selectedIids.length}）` : ''}`),
       )
 
       const detailView = detail ? h('div', { className: 'dgi-detail' },
@@ -1258,7 +1254,7 @@ window.__ModuleLoader__.load({
         notice ? h('div', { className: 'dgi-notice-row dgi-hint' }, notice) : null,
         tokenReady ? null : h('div', { className: 'dgi-hint' }, '未配置 GitLab 令牌：请在「设置 → GitLab 议题」粘贴个人访问令牌（PAT），或设置环境变量 GITLAB_TOKEN。'),
         error ? h('div', { className: 'dgi-hint' }, error) : null,
-        h('div', { className: 'dgi-hint' }, '勾选多行 → 「一起开工」把这几条的开工提示词一次填进该工作区会话；点一行看详情；行内「编辑」可改标题/描述/标签/指派/截止；详情里可评论、关闭·重开、删除。'),
+        h('div', { className: 'dgi-hint' }, '勾选多行 → 「复制提示词」把这几条的开工提示词一次复制到剪贴板（面板跨会话，不直接往输入框塞）；点一行看详情；行内「编辑」可改标题/描述/标签/指派/截止；详情里可评论、关闭·重开、删除。'),
         h('div', { className: 'dgi-split' }, list, detailView),
         pager,
         confirm ? h(ConfirmModal, {
