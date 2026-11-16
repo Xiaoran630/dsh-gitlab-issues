@@ -13,7 +13,7 @@
 | 一键开工 | 点一条议题 → 开工提示词填入输入框（**不自动发送**，你确认后回车） |
 | 独立面板 | 左侧栏「议题」入口：项目选择 / 状态·标签·关键词·**用户** 筛选 / 详情 / 评论 / **编辑** / 关闭·重开 / **删除** / **手动新建** |
 | 用户筛选 | 浮层与面板都带「用户筛选」下拉（全部用户 / 具体成员，当前账号标「我 ·」）；**设置里可配默认用户**，打开就按他筛，随时能手动改成别人或「全部用户」 |
-| Agent 工具 | 4 个工具按会话注册，写操作先走 DSH 审批 |
+| Agent 工具 | 4 个工具按会话注册，写操作按会话审批策略决定要不要先问一句 |
 | 上下文注入 | 命中的会话自动带上「本工作区项目 + 打开议题摘要」（默认 ≤12 条，同步读缓存，不打网络） |
 
 插件**不含任何模型调用**：需求理解、标题撰写、复杂度/类型判断都交给当前会话的 DSH agent；插件只做「探测 + 取数 + 结构化写 GitLab」。
@@ -53,10 +53,19 @@ plugin_manager install_bundle  target = <本仓库>/plugin
 |---|---|
 | `gitlab_issues` | 列议题（状态/标签/关键词/只看我的/条数） |
 | `gitlab_issue` | 读某条议题的完整描述与验收标准（可选带最近评论） |
-| `gitlab_issue_create` | 新建议题：五必填校验 + 项目标签字典解析 + **审批** + 创建 |
-| `gitlab_issue_write` | 评论 / 关闭 / 重开 / 改指派 / 改标签：同样先审批 |
+| `gitlab_issue_create` | 新建议题：五必填校验 + 项目标签字典解析 + 按策略确认 + 创建 |
+| `gitlab_issue_write` | 评论 / 关闭 / 重开 / 改指派 / 改标签：同样按策略确认 |
 
-- 写操作通过 `ctx.approval.request` 请求确认，只有 `allowed-once` 才真正发出请求；**没有审批通道时一律拒绝**（fail closed）。
+写操作的授权**跟着会话审批策略走**（`approval.effectivePolicy(session)`）：
+
+| 会话审批策略 | `gitlab_issue_create` / `gitlab_issue_write` |
+|---|---|
+| `never`（完全权限、无人可问） | 直接执行，不弹确认；工具结果里注明「审批策略为 never，写操作直接执行」 |
+| `ask` | 调 `ctx.approval.request` 问一次，只有 `allowed-once` 才写；`rejected` / `cancelled` / `unavailable` / 抛错一律拒绝并说明原因 |
+| 没有 approval 服务（部分精简/headless 环境） | 直接执行 |
+
+> 早先的版本无条件 `requireApproval`，而 `never` 策略下 `request()` 必定返回 `rejected` —— 结果是**完全权限下反而建不了议题**。现在按策略分流，两种模式都能用。
+> 当前策略可在 `POST /dsh-gitlab-issues/api/diagnostics` 的 `approval` 字段里查（`sessionPolicy` / `writesRunWithoutPrompt`）。
 - 几个工具都**不接受 project 参数**——目标项目永远是当前会话工作区的那个仓库，避免误建到别的仓库。
 
 ## HTTP 路由（同源，供界面用）

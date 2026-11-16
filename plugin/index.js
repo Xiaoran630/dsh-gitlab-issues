@@ -29,6 +29,7 @@ import {
 import { LabelCatalog } from './lib/labels.js'
 import { buildWorkPrompt, buildMultiWorkPrompt, buildCreateIssuePrompt, buildCreateIssueIntro } from './lib/prompt.js'
 import { readSettings, writeSettings, publicSettings, TOKEN_REF } from './lib/settings.js'
+import { gateWrite, approvalNote, policyOfService } from './lib/write-gate.js'
 
 export const name = 'dsh-gitlab-issues'
 export const inject = ['tools']
@@ -423,26 +424,44 @@ export function apply(ctx, config = {}) {
     return `#${issue.iid} ${issue.title}（${issue.state}）${labels}${who}${due}`
   }
 
-  async function requireApproval(agent, toolName, reason, exec) {
-    const approval = ctx.get('approval')
-    if (!approval || typeof approval.request !== 'function') {
-      return { ok: false, message: '当前环境没有审批通道，出于安全写操作被拒绝。' }
-    }
+  // ------------------------------------------------------------------ 写操作授权
+  //
+  // 之前这里无条件把 approval.request() 的结果当成唯一许可来源，而 DSH 的会话审批策略只有
+  // ask / never 两个值：never（完全权限 / 无人可问）下 request() 必定回 rejected。于是插件在
+  // 完全权限环境里永远建不了议题 —— 用户实际就是被这条挡住的。
+  // 分流规则与 <result> 结构见 lib/write-gate.js（带单测）：
+  //   · never / 没有 approval 服务 → 直接执行（用户已关掉逐条确认）
+  //   · ask                        → 问一次，只有 allowed-once 才写
+  //   · rejected / cancelled / unavailable / 抛错 → 拒绝并说明怎么放行
+
+  function approvalService() {
     try {
-      const outcome = await approval.request({
-        agent,
-        toolName,
-        callId: exec?.callId,
-        reason,
-        signal: exec?.signal,
-      })
-      if (outcome !== 'allowed-once') {
-        return { ok: false, message: `写操作未获批准（${outcome}），没有对 GitLab 做任何修改。` }
-      }
-      return { ok: true }
-    } catch (error) {
-      return { ok: false, message: `审批未完成：${describeError(error)}` }
+      const service = ctx.get('approval')
+      return service && typeof service === 'object' ? service : null
+    } catch {
+      return null
     }
+  }
+
+  function approvalPolicyOfSession(session) {
+    return policyOfService(approvalService(), session)
+  }
+
+  function approvalPolicyOf(agent) {
+    return approvalPolicyOfSession(agent?.session)
+  }
+
+  function requireApproval(agent, toolName, reason, exec) {
+    return gateWrite({
+      approval: approvalService(),
+      agent,
+      toolName,
+      reason,
+      callId: exec?.callId,
+      signal: exec?.signal,
+      log,
+      warn,
+    })
   }
 
   function buildAgentTools(agent, state) {
@@ -550,7 +569,7 @@ export function apply(ctx, config = {}) {
         `在公司 GitLab 项目（${repo.projectPath}）新建一条议题。调用前按 skill gitlab-issue-workflow 补齐五必填：` +
         '标题一句话且可验收（不要「优化/完善/重构」这类状态词）；描述含「## 任务目标」「## 验收标准」；' +
         '指派默认是当前用户；复杂度（S/M/L）与类型（功能/修复/重构/文档）各一个标签；截止日期默认本周五；不要填 milestone。' +
-        '该工具会先向用户请求确认，只有批准后才真正创建。',
+        '会话开着审批确认时会先请求批准；审批策略为 never（完全权限）时直接创建。',
       parameters: {
         type: 'object',
         properties: {
@@ -594,7 +613,7 @@ export function apply(ctx, config = {}) {
           const warnings = validation.warnings.length > 0 ? `\n（${validation.warnings.join('；')}）` : ''
           return {
             ok: true,
-            message: `已创建 #${issue.iid}「${issue.title}」\n${issue.web_url}\n标签：${issue.labels.join('、')}\n截止：${issue.due_date || '无'}${warnings}`,
+            message: `已创建 #${issue.iid}「${issue.title}」\n${issue.web_url}\n标签：${issue.labels.join('、')}\n截止：${issue.due_date || '无'}${warnings}${approvalNote(approval)}`,
             issue,
           }
         } catch (error) {
@@ -607,7 +626,7 @@ export function apply(ctx, config = {}) {
       name: 'gitlab_issue_write',
       description:
         `修改公司 GitLab 项目（${repo.projectPath}）的某条议题：加评论、关闭、重开、改指派或改标签。` +
-        '该工具会先向用户请求确认，只有批准后才真正执行；一次只做一个动作。',
+        '该工具一次只做一个动作；会话开着审批确认时会先请求批准，策略为 never（完全权限）时直接执行。',
       parameters: {
         type: 'object',
         properties: {
@@ -665,7 +684,7 @@ export function apply(ctx, config = {}) {
             await api.updateIssue(repo.baseUrl, repo.projectPath, iid, payload)
           }
           issuesCache.delete(repoKey(repo))
-          return { ok: true, message: `已完成：${describe}` }
+          return { ok: true, message: `已完成：${describe}${approvalNote(approval)}` }
         } catch (error) {
           return { ok: false, message: describeError(error) }
         }
@@ -1272,6 +1291,13 @@ export function apply(ctx, config = {}) {
           const cwd = sessionCwd(body.sessionId)
           const repo = detectRepoCached(cwd)
           const remotes = cwd ? listRepoRemotes(cwd) : { repoRoot: null, remotes: [] }
+          const approval = approvalService()
+          let session = null
+          if (body.sessionId) {
+            try {
+              session = ctx.get('sessions')?.get?.(body.sessionId) ?? null
+            } catch { session = null }
+          }
           json(res, {
             ok: true,
             cwd: cwd ?? null,
@@ -1280,6 +1306,12 @@ export function apply(ctx, config = {}) {
             companyRepo: repo ? { projectPath: repo.projectPath, hostPort: repo.hostPort } : null,
             remotes: remotes.remotes.map((r) => ({ name: r.name, url: r.url, host: r.parsed?.hostPort ?? null })),
             hosts: currentSettings().hosts,
+            approval: {
+              service: !!approval,
+              defaultPolicy: approval?.config?.policy ?? null,
+              sessionPolicy: session ? approvalPolicyOfSession(session) : (body.sessionId ? 'unknown' : null),
+              writesRunWithoutPrompt: !approval || !session || approvalPolicyOfSession(session) === 'never',
+            },
           })
           return
         }

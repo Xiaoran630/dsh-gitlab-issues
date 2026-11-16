@@ -17,6 +17,7 @@ import {
 import { LabelCatalog, lastSegment, normalizeTypeKey } from '../lib/labels.js'
 import { buildWorkPrompt, buildCreateIssuePrompt } from '../lib/prompt.js'
 import { toBody, toQuery } from '../lib/gitlab.js'
+import { gateWrite, approvalNote, policyOfService } from '../lib/write-gate.js'
 
 // ---------------------------------------------------------------- remote 解析
 
@@ -290,4 +291,83 @@ test('toBody 丢掉 null/undefined，toQuery 丢掉空值', () => {
   assert.equal(toBody({ a: 1, b: null, c: undefined, d: 'x' }), '{"a":1,"d":"x"}')
   assert.equal(toQuery({ state: 'opened', search: '', labels: null, page: 2 }), 'state=opened&page=2')
   assert.equal(toQuery({}), '')
+})
+
+// ---------------------------------------------------------------- 写操作授权闸门
+//
+// 回归点：DSH 的审批策略只有 ask / never。never 表示「本会话不再问审批」，此时
+// approval.request() 必定返回 rejected —— 旧实现把 rejected 当成拒绝执行，于是完全权限
+// 模式下 gitlab_issue_create / gitlab_issue_write 永远用不了。
+
+const fakeApproval = ({ policy, outcome, fail } = {}) => {
+  const calls = []
+  return {
+    calls,
+    effectivePolicy: policy === undefined ? undefined : () => policy,
+    request(req) {
+      calls.push(req)
+      if (fail) return Promise.reject(new Error(fail))
+      return Promise.resolve(typeof outcome === 'function' ? outcome(req) : outcome)
+    },
+  }
+}
+
+test('policyOfService：读 effectivePolicy，回落 overrideOf，缺服务报 no-service', () => {
+  assert.equal(policyOfService(null, {}), 'no-service')
+  assert.equal(policyOfService({ effectivePolicy: () => 'never' }, {}), 'never')
+  assert.equal(policyOfService({ overrideOf: () => 'ask' }, {}), 'ask')
+  // 没有 session 就不知道策略 → unknown（调用方走保守分支）
+  assert.equal(policyOfService({ effectivePolicy: () => 'never' }, null), 'unknown')
+  // 策略读取抛错也降级成 unknown，不能把写操作炸掉
+  assert.equal(policyOfService({ effectivePolicy: () => { throw new Error('boom') } }, {}), 'unknown')
+})
+
+test('gateWrite：策略 never 直接执行，根本不问审批（完全权限模式的核心回归）', async () => {
+  const approval = fakeApproval({ policy: 'never', outcome: 'rejected' })
+  const gate = await gateWrite({ approval, agent: { session: {} }, toolName: 'gitlab_issue_create', reason: 'r' })
+  assert.equal(gate.ok, true)
+  assert.equal(gate.prompted, false)
+  assert.equal(gate.policy, 'never')
+  assert.equal(approval.calls.length, 0)
+  assert.match(approvalNote(gate), /never/)
+})
+
+test('gateWrite：没有 approval 服务也直接执行', async () => {
+  const gate = await gateWrite({ approval: null, agent: { session: {} }, toolName: 'gitlab_issue_write', reason: 'r' })
+  assert.equal(gate.ok, true)
+  assert.equal(gate.prompted, false)
+  assert.equal(gate.policy, 'no-service')
+  assert.equal(approvalNote(gate), '')
+})
+
+test('gateWrite：策略 ask 时允许一次才放行，且真的发起了审批', async () => {
+  const approval = fakeApproval({ policy: 'ask', outcome: 'allowed-once' })
+  const gate = await gateWrite({ approval, agent: { session: {} }, toolName: 'gitlab_issue_create', reason: 'r', callId: 'c1' })
+  assert.equal(gate.ok, true)
+  assert.equal(gate.prompted, true)
+  assert.equal(approval.calls.length, 1)
+  assert.equal(approval.calls[0].callId, 'c1')
+  assert.equal(approvalNote(gate), '')
+})
+
+test('gateWrite：策略 ask 下 rejected / unavailable / 抛错都拒绝', async () => {
+  const rejected = await gateWrite({ approval: fakeApproval({ policy: 'ask', outcome: 'rejected' }), agent: { session: {} }, toolName: 't', reason: 'r' })
+  assert.equal(rejected.ok, false)
+  assert.match(rejected.message, /rejected/)
+
+  const unavailable = await gateWrite({ approval: fakeApproval({ policy: 'ask', outcome: 'unavailable' }), agent: { session: {} }, toolName: 't', reason: 'r' })
+  assert.equal(unavailable.ok, false)
+  assert.match(unavailable.message, /unavailable/)
+  assert.match(unavailable.message, /never/) // 告诉用户怎么放行
+
+  const crashed = await gateWrite({ approval: fakeApproval({ policy: 'ask', fail: 'no open turn' }), agent: { session: {} }, toolName: 't', reason: 'r' })
+  assert.equal(crashed.ok, false)
+  assert.match(crashed.message, /no open turn/)
+})
+
+test('gateWrite：只认 allowed-once，其它返回值一律拒绝', async () => {
+  for (const outcome of ['deny', 'yes', '', undefined]) {
+    const gate = await gateWrite({ approval: fakeApproval({ policy: 'ask', outcome }), agent: { session: {} }, toolName: 't', reason: 'r' })
+    assert.equal(gate.ok, false, `outcome=${String(outcome)} 不应该放行`)
+  }
 })
